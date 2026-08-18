@@ -1,0 +1,88 @@
+{
+    "name": "chubbyphp/chubbyphp-oidc",
+    "description": "A minimal OIDC (OpenID Connect) resource server middleware for PSR 15: resolves the issuer's openid configuration, verifies JWT bearer tokens against its JWKS and passes the verified claims to the handler via request attributes.",
+    "keywords": [
+        "chubbyphp",
+        "oidc",
+        "openid-connect",
+        "jwt",
+        "jwks",
+        "bearer",
+        "middleware",
+        "psr-7",
+        "psr-15",
+        "psr-17",
+        "psr-18"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Dominik Zogg",
+            "email": "dominik.zogg@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "psr/clock": "^1.0",
+        "psr/http-client": "^1.0.3",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^1.1|^2.0",
+        "psr/http-server-middleware": "^1.0.2",
+        "psr/log": "^3.0.2",
+        "web-token/jwt-library": "^4.1.7"
+    },
+    "require-dev": {
+        "chubbyphp/chubbyphp-dev-helper": "dev-master",
+        "chubbyphp/chubbyphp-laminas-config": "^1.5.2",
+        "chubbyphp/chubbyphp-laminas-config-factory": "^1.5.2",
+        "chubbyphp/chubbyphp-mock": "^2.2.1",
+        "guzzlehttp/guzzle": "^7.10.0",
+        "infection/infection": "^0.34.0",
+        "php-coveralls/php-coveralls": "^2.9.1",
+        "phpstan/extension-installer": "^1.4.3",
+        "phpstan/phpstan": "^2.2.5",
+        "phpunit/phpunit": "^12.5.30",
+        "slim/psr7": "^1.8",
+        "testcontainers/testcontainers": "^1.0.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "Chubbyphp\\Oidc\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Chubbyphp\\Tests\\Oidc\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "infection/extension-installer": true,
+            "php-http/discovery": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "1.0-dev"
+        }
+    },
+    "scripts": {
+        "fix:cs": "mkdir -p build && vendor/bin/php-cs-fixer fix --cache-file=build/phpcs.cache",
+        "test": [
+            "@test:lint",
+            "@test:static-analysis",
+            "@test:cs",
+            "@test:unit",
+            "@test:integration",
+            "@test:infection"
+        ],
+        "test:cs": "mkdir -p build && vendor/bin/php-cs-fixer fix --dry-run --stop-on-violation --cache-file=build/phpcs.cache",
+        "test:infection": "vendor/bin/infection --threads=$(nproc) --min-msi=100 --verbose --coverage=build/phpunit",
+        "test:integration": "vendor/bin/phpunit --configuration phpunit.integration.xml --cache-directory=build/phpunit/integration --do-not-fail-on-empty-test-suite",
+        "test:lint": "mkdir -p build && find src tests -name '*.php' -print0 | xargs -0 -n1 -P$(nproc) php -l | tee build/phplint.log",
+        "test:static-analysis": "mkdir -p build && bash -c 'vendor/bin/phpstan analyse src --no-progress --level=9 --error-format=junit | tee build/phpstan.junit.xml; if [ ${PIPESTATUS[0]} -ne \"0\" ]; then exit 1; fi'",
+        "test:unit": "vendor/bin/phpunit --coverage-text --coverage-clover=build/phpunit/clover.xml --coverage-html=build/phpunit/coverage-html --coverage-xml=build/phpunit/coverage-xml --log-junit=build/phpunit/junit.xml --cache-directory=build/phpunit"
+    }
+}
