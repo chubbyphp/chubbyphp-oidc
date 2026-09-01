@@ -1304,7 +1304,10 @@ final class JwtTokenVerifierTest extends TestCase
 
         yield 'crit with empty string' => [['crit' => [''], 'b64' => true], \sprintf($notChecked, '')];
 
-        yield 'crit with non string' => [['crit' => [42], 'b64' => true], \sprintf($notChecked, '42')];
+        yield 'crit with non string' => [
+            ['crit' => [42], 'b64' => true],
+            'The header "crit" must be a list of header parameters.',
+        ];
 
         yield 'crit with not recognized parameter' => [
             ['crit' => ['b64', 'exp'], 'b64' => true, 'exp' => self::NOW + 300],

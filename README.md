@@ -36,7 +36,7 @@ request attributes.
  * [psr/http-message][5]: ^1.1|^2.0
  * [psr/http-server-middleware][6]: ^1.0.2
  * [psr/log][7]: ^3.0.2
- * [web-token/jwt-library][8]: ^4.1.7
+ * [web-token/jwt-library][8]: ^4.2.2
 
 ## Installation
 
