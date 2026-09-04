@@ -34,8 +34,12 @@ final class RemoteJwkSetTest extends TestCase
     private const EC_JWK = ['kty' => 'EC', 'crv' => 'P-256', 'x' => 'x', 'y' => 'y'];
 
     #[DataProvider('provideCreateRemoteJwkSetWithNegativeOptionCases')]
-    public function testCreateRemoteJwkSetWithNegativeOption(string $name, int $maxAge, int $cooldown): void
-    {
+    public function testCreateRemoteJwkSetWithNegativeOption(
+        string $name,
+        int $maxAge,
+        int $cooldown,
+        int $maxStale,
+    ): void {
         $builder = new MockObjectBuilder();
 
         [$client, $requestFactory] = self::createFetchMocks($builder, []);
@@ -43,17 +47,32 @@ final class RemoteJwkSetTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage(\sprintf('Invalid %s -1: must be a non-negative number of seconds', $name));
 
-        new RemoteJwkSet($client, $requestFactory, $maxAge, $cooldown);
+        new RemoteJwkSet($client, $requestFactory, $maxAge, $cooldown, $maxStale);
     }
 
     /**
-     * @return iterable<string, array{string, int, int}>
+     * @return iterable<string, array{string, int, int, int}>
      */
     public static function provideCreateRemoteJwkSetWithNegativeOptionCases(): iterable
     {
-        yield 'negative maxAge' => ['maxAge', -1, 30];
+        yield 'negative maxAge' => ['maxAge', -1, 30, 3600];
 
-        yield 'negative cooldown' => ['cooldown', 600, -1];
+        yield 'negative cooldown' => ['cooldown', 600, -1, 3600];
+
+        yield 'negative maxStale' => ['maxStale', 600, 30, -1];
+    }
+
+    public function testCreateRemoteJwkSetWithUnboundedMaxStale(): void
+    {
+        $builder = new MockObjectBuilder();
+
+        [$client, $requestFactory] = self::createFetchMocks($builder, []);
+
+        $remoteJwkSet = new RemoteJwkSet($client, $requestFactory, maxStale: null);
+
+        $maxStaleReflectionProperty = new \ReflectionProperty($remoteJwkSet, 'maxStale');
+
+        self::assertNull($maxStaleReflectionProperty->getValue($remoteJwkSet));
     }
 
     public function testResolveKey(): void
@@ -354,6 +373,157 @@ final class RemoteJwkSetTest extends TestCase
         self::assertSame(
             self::OTHER_RSA_JWK,
             $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-2', self::NOW + 20)->all()
+        );
+    }
+
+    public function testResolveKeyWithExpiredJwksCacheAndFailedRefreshBeyondMaxStale(): void
+    {
+        $builder = new MockObjectBuilder();
+
+        [$client, $requestFactory] = self::createFetchMocks($builder, [
+            ['keys' => [self::RSA_JWK]],
+            ['status' => 500],
+            ['status' => 500],
+            ['keys' => [self::OTHER_RSA_JWK]],
+        ]);
+
+        $remoteJwkSet = new RemoteJwkSet($client, $requestFactory, maxAge: 10, cooldown: 10, maxStale: 20);
+
+        self::assertSame(self::RSA_JWK, $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW)->all());
+
+        // expired cache, failed refresh: serve the stale jwks instead of failing
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 10)->all()
+        );
+
+        // after cooldown, failed refresh again, still within max stale: still stale
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 21)->all()
+        );
+
+        // within cooldown, one second before max stale (maxAge + maxStale since the last successful fetch): still
+        // stale, no fetch
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 29)->all()
+        );
+
+        // max stale reached (within cooldown): the stale jwks is not used anymore, fail with the last jwks error
+        try {
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 30);
+
+            self::fail('Expected JwksException not thrown');
+        } catch (JwksException $exception) {
+            self::assertSame('Expected 200 OK from the JSON Web Key Set HTTP response', $exception->getMessage());
+        }
+
+        // after cooldown: fetch again, success revives the key resolution
+        self::assertSame(
+            self::OTHER_RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-2', self::NOW + 31)->all()
+        );
+    }
+
+    public function testResolveKeyWithExpiredJwksCacheAndFailedRefreshBeyondDefaultMaxStale(): void
+    {
+        $builder = new MockObjectBuilder();
+
+        [$client, $requestFactory] = self::createFetchMocks($builder, [
+            ['keys' => [self::RSA_JWK]],
+            ['status' => 500],
+            ['status' => 500],
+            ['keys' => [self::OTHER_RSA_JWK]],
+        ]);
+
+        $remoteJwkSet = new RemoteJwkSet($client, $requestFactory, maxAge: 10, cooldown: 10);
+
+        self::assertSame(self::RSA_JWK, $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW)->all());
+
+        // expired cache, failed refresh: serve the stale jwks instead of failing
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 10)->all()
+        );
+
+        // after cooldown, failed refresh again, one second before the default max stale of one hour: still stale
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 3609)->all()
+        );
+
+        // max stale reached (within cooldown): the stale jwks is not used anymore, fail with the last jwks error
+        try {
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 3610);
+
+            self::fail('Expected JwksException not thrown');
+        } catch (JwksException $exception) {
+            self::assertSame('Expected 200 OK from the JSON Web Key Set HTTP response', $exception->getMessage());
+        }
+
+        // after cooldown: fetch again, success revives the key resolution
+        self::assertSame(
+            self::OTHER_RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-2', self::NOW + 3619)->all()
+        );
+    }
+
+    public function testResolveKeyWithExpiredJwksCacheAndFailedRefreshWithoutMaxStale(): void
+    {
+        $error = new \RuntimeException('fetch failed');
+
+        $builder = new MockObjectBuilder();
+
+        [$client, $requestFactory] = self::createFetchMocks($builder, [
+            ['keys' => [self::RSA_JWK]],
+            ['exception' => $error],
+            ['keys' => [self::OTHER_RSA_JWK]],
+        ]);
+
+        // zero never serves a stale jwks
+        $remoteJwkSet = new RemoteJwkSet($client, $requestFactory, maxAge: 10, cooldown: 10, maxStale: 0);
+
+        self::assertSame(self::RSA_JWK, $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW)->all());
+
+        // expired cache, failed refresh: fail instead of serving the stale jwks
+        self::assertThrows($remoteJwkSet, self::NOW + 10, $error);
+
+        // within cooldown: fail fast with the same error, no fetch
+        self::assertThrows($remoteJwkSet, self::NOW + 19, $error);
+
+        // after cooldown: fetch again
+        self::assertSame(
+            self::OTHER_RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-2', self::NOW + 20)->all()
+        );
+    }
+
+    public function testResolveKeyWithExpiredJwksCacheAndFailedRefreshWithUnboundedMaxStale(): void
+    {
+        $builder = new MockObjectBuilder();
+
+        [$client, $requestFactory] = self::createFetchMocks($builder, [
+            ['keys' => [self::RSA_JWK]],
+            ['status' => 500],
+            ['status' => 500],
+        ]);
+
+        // null serves the stale jwks for as long as the outage lasts
+        $remoteJwkSet = new RemoteJwkSet($client, $requestFactory, maxAge: 10, cooldown: 10, maxStale: null);
+
+        self::assertSame(self::RSA_JWK, $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW)->all());
+
+        // expired cache, failed refresh: serve the stale jwks instead of failing
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 10)->all()
+        );
+
+        // a year later, failed refresh again: still stale
+        self::assertSame(
+            self::RSA_JWK,
+            $remoteJwkSet->resolveKey(self::JWKS_URI, 'RS256', 'key-1', self::NOW + 31536000)->all()
         );
     }
 

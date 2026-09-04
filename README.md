@@ -43,7 +43,7 @@ request attributes.
 Through [Composer](http://getcomposer.org) as [chubbyphp/chubbyphp-oidc][1].
 
 ```sh
-composer require chubbyphp/chubbyphp-oidc "^1.0"
+composer require chubbyphp/chubbyphp-oidc "^1.1"
 ```
 
 ## Usage
@@ -154,6 +154,8 @@ $remoteJwkSet = new RemoteJwkSet(
     maxAge: 600, // seconds a fetched jwks is cached (non-negative), default: 600
     cooldown: 30, // seconds until a failed jwks (re)fetch is retried, and between refetches for unknown key ids
     // (non-negative), default: 30
+    maxStale: 86400, // seconds an expired jwks keeps being used while its refetch fails (non-negative, 0: never,
+    // null: for as long as the outage lasts), default: 3600
 );
 
 // verifies signature (via the issuer's JWKS), "iss", "aud", "exp", "nbf" and returns the claims
@@ -161,7 +163,7 @@ $tokenVerifier = new JwtTokenVerifier(
     $oidcConfigurationResolver,
     $remoteJwkSet,
     audience: 'https://api.example.com', // string | array<string>, required (non-empty, enforced at runtime)
-    algorithms: ['RS256'], // default: any asymmetric algorithm supported by web-token/jwt-library
+    algorithms: ['RS256'], // non-empty subset of RemoteJwkSet::SUPPORTED_ALGORITHMS (keys), default: all of them
     clockTolerance: 5, // seconds (non-negative), default: 0
     typ: 'at+jwt', // expected "typ" header, default: not checked
     requiredClaims: ['sub', 'iat', 'jti'], // additionally required claims, "iss", "aud" and "exp" always are
@@ -198,9 +200,15 @@ $oidcAuthenticationMiddleware = new OidcAuthenticationMiddleware(
  * **Outages:** If the issuer is unreachable while the cached configuration or jwks is expired, the last known one
    keeps being used (a refetch is retried after the respective `cooldown`), so a temporary issuer outage does
    not take your api down. Only if there never was a successful fetch the error is thrown (`5xx`), within the
-   cooldown immediately without hitting the issuer again. An invalid discovery / jwks response is reported as
-   `Chubbyphp\Oidc\Exception\OidcConfigurationException` / `Chubbyphp\Oidc\Exception\JwksException`. In a classic php-fpm setup the in-memory cache lives
-   per request; use a long-running runtime (roadrunner, swoole, workerman, frankenphp) to benefit from it.
+   cooldown immediately without hitting the issuer again. Be aware that a stale jwks still contains keys the
+   issuer removed in the meantime (e.g. a compromised one), so tokens signed with them stay valid while the stale
+   jwks is used: the `maxStale` of the `RemoteJwkSet` bounds this window (default: one hour, after
+   `maxAge + maxStale` since the last successful fetch, verification fails with the last jwks error until a
+   refetch succeeds), `0` disables serving a stale jwks altogether, `null` keeps using it for as long as the
+   outage lasts. An invalid discovery / jwks response is reported as
+   `Chubbyphp\Oidc\Exception\OidcConfigurationException` / `Chubbyphp\Oidc\Exception\JwksException`. In a
+   classic php-fpm setup the in-memory cache lives per request; use a long-running runtime (roadrunner, swoole,
+   workerman, frankenphp) to benefit from it.
  * **Clock:** Every time based check (`exp`, `nbf`, configuration and jwks cache expiry) uses the injected PSR-20
    clock, which defaults to `Chubbyphp\Oidc\Clock\SystemClock`.
  * **Custom verifier:** A `TokenVerifierInterface` is just `verify(string $token): array`. Throw an
@@ -233,6 +241,7 @@ return [
             // 'requiredClaims' => ['sub', 'iat', 'jti'],
             // 'jwksMaxAge' => 600,
             // 'jwksCooldown' => 30,
+            // 'jwksMaxStale' => 86400,
         ],
     ],
     'dependencies' => [

@@ -62,6 +62,10 @@ final class RemoteJwkSetFactoryTest extends TestCase
         $cooldownReflectionProperty = new \ReflectionProperty($service, 'cooldown');
 
         self::assertSame(30, $cooldownReflectionProperty->getValue($service));
+
+        $maxStaleReflectionProperty = new \ReflectionProperty($service, 'maxStale');
+
+        self::assertSame(3600, $maxStaleReflectionProperty->getValue($service));
     }
 
     public function testInvoke(): void
@@ -81,6 +85,7 @@ final class RemoteJwkSetFactoryTest extends TestCase
                     'oidc' => [
                         'jwksMaxAge' => 300,
                         'jwksCooldown' => 10,
+                        'jwksMaxStale' => 60,
                     ],
                 ],
             ]),
@@ -101,6 +106,45 @@ final class RemoteJwkSetFactoryTest extends TestCase
         $cooldownReflectionProperty = new \ReflectionProperty($service, 'cooldown');
 
         self::assertSame(10, $cooldownReflectionProperty->getValue($service));
+
+        $maxStaleReflectionProperty = new \ReflectionProperty($service, 'maxStale');
+
+        self::assertSame(60, $maxStaleReflectionProperty->getValue($service));
+    }
+
+    public function testInvokeWithUnboundedMaxStale(): void
+    {
+        $builder = new MockObjectBuilder();
+
+        /** @var ClientInterface $client */
+        $client = $builder->create(ClientInterface::class, []);
+
+        /** @var RequestFactoryInterface $requestFactory */
+        $requestFactory = $builder->create(RequestFactoryInterface::class, []);
+
+        /** @var ContainerInterface $container */
+        $container = $builder->create(ContainerInterface::class, [
+            new WithReturn('get', ['config'], [
+                'chubbyphp' => [
+                    'oidc' => [
+                        // null (unbounded) is a valid value, not a missing one
+                        'jwksMaxStale' => null,
+                    ],
+                ],
+            ]),
+            new WithReturn('get', [ClientInterface::class], $client),
+            new WithReturn('get', [RequestFactoryInterface::class], $requestFactory),
+        ]);
+
+        $factory = new RemoteJwkSetFactory();
+
+        $service = $factory($container);
+
+        self::assertInstanceOf(RemoteJwkSet::class, $service);
+
+        $maxStaleReflectionProperty = new \ReflectionProperty($service, 'maxStale');
+
+        self::assertNull($maxStaleReflectionProperty->getValue($service));
     }
 
     public function testCallStatic(): void
@@ -121,6 +165,7 @@ final class RemoteJwkSetFactoryTest extends TestCase
                         'default' => [
                             'jwksMaxAge' => 300,
                             'jwksCooldown' => 10,
+                            'jwksMaxStale' => 60,
                         ],
                     ],
                 ],
@@ -142,5 +187,9 @@ final class RemoteJwkSetFactoryTest extends TestCase
         $cooldownReflectionProperty = new \ReflectionProperty($service, 'cooldown');
 
         self::assertSame(10, $cooldownReflectionProperty->getValue($service));
+
+        $maxStaleReflectionProperty = new \ReflectionProperty($service, 'maxStale');
+
+        self::assertSame(60, $maxStaleReflectionProperty->getValue($service));
     }
 }

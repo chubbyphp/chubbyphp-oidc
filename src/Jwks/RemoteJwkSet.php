@@ -13,7 +13,8 @@ use Psr\Http\Message\RequestFactoryInterface;
 /**
  * Fetches and caches the JSON Web Key Set of a jwks uri and selects the (single) key a token can be verified with:
  * the jwks gets refetched after maxAge, on an unknown key id (key rotation) at most once per cooldown, and during
- * an outage the last known keys are served (stale) instead of failing.
+ * an outage the last known keys are served (stale) instead of failing, but for at most maxStale after the cache
+ * expired.
  */
 final class RemoteJwkSet
 {
@@ -50,14 +51,25 @@ final class RemoteJwkSet
      */
     private ?array $failure = null;
 
+    /**
+     * @param null|int $maxStale seconds an expired jwks keeps being used while its refetch fails (0: never, null: for
+     *                           as long as the outage lasts). Bounded by default: a key the issuer removed (e.g. a
+     *                           compromised one) must not stay valid for as long as a jwks outage lasts, null trades
+     *                           this for availability.
+     */
     public function __construct(
         private readonly ClientInterface $client,
         private readonly RequestFactoryInterface $requestFactory,
         private readonly int $maxAge = 600,
         private readonly int $cooldown = 30,
+        private readonly ?int $maxStale = 3600,
     ) {
         self::assertNonNegative('maxAge', $maxAge);
         self::assertNonNegative('cooldown', $cooldown);
+
+        if (null !== $maxStale) {
+            self::assertNonNegative('maxStale', $maxStale);
+        }
     }
 
     /**
@@ -66,8 +78,10 @@ final class RemoteJwkSet
      * @param int    $now the current unix timestamp
      *
      * @throws InvalidTokenException if there is no (or no unambiguous) applicable key for the token
-     * @throws JwksException         if the jwks cannot be fetched or is malformed (and there are no stale keys)
-     * @throws \Throwable            any error of the http client (and there are no stale keys)
+     * @throws JwksException         if the jwks cannot be fetched or is malformed (and there are no stale keys, or
+     *                               they are stale for longer than maxStale)
+     * @throws \Throwable            any error of the http client (and there are no stale keys, or they are stale
+     *                               for longer than maxStale)
      */
     public function resolveKey(string $jwksUri, string $alg, mixed $kid, int $now): JWK
     {
@@ -80,7 +94,7 @@ final class RemoteJwkSet
 
         // fail fast (or serve stale) during an outage instead of hitting the jwks uri with every request
         if (null !== $this->failure && $this->failure['retryAfter'] > $now) {
-            return $this->resolveStaleKey($alg, $kid, $this->failure['error']);
+            return $this->resolveStaleKey($alg, $kid, $now, $this->failure['error']);
         }
 
         try {
@@ -91,22 +105,27 @@ final class RemoteJwkSet
         } catch (\Throwable $error) {
             $this->failure = ['error' => $error, 'retryAfter' => $now + $this->cooldown];
 
-            return $this->resolveStaleKey($alg, $kid, $error);
+            return $this->resolveStaleKey($alg, $kid, $now, $error);
         }
     }
 
     /**
      * A jwks outage should not take the resource server down: verify against the last known keys (if there ever
-     * were any) instead of failing.
+     * were any) instead of failing, but only for maxStale after the cache expired: a key the issuer removed since
+     * (e.g. a compromised one) must not stay valid for as long as the outage lasts.
      */
-    private function resolveStaleKey(string $alg, mixed $kid, \Throwable $error): JWK
+    private function resolveStaleKey(string $alg, mixed $kid, int $now, \Throwable $error): JWK
     {
-        if (null !== $this->jwks) {
-            return $this->findKey($this->jwks['keys'], $alg, $kid)
-                ?? throw new InvalidTokenException('no applicable key found in the JSON Web Key Set');
+        if (null === $this->jwks) {
+            throw $error;
         }
 
-        throw $error;
+        if (null !== $this->maxStale && $this->jwks['fetchedAt'] + $this->maxAge + $this->maxStale <= $now) {
+            throw $error;
+        }
+
+        return $this->findKey($this->jwks['keys'], $alg, $kid)
+            ?? throw new InvalidTokenException('no applicable key found in the JSON Web Key Set');
     }
 
     private function resolveRemoteKey(string $jwksUri, string $alg, mixed $kid, int $now): JWK
