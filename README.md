@@ -43,7 +43,7 @@ request attributes.
 Through [Composer](http://getcomposer.org) as [chubbyphp/chubbyphp-oidc][1].
 
 ```sh
-composer require chubbyphp/chubbyphp-oidc "^1.1"
+composer require chubbyphp/chubbyphp-oidc "^1.2"
 ```
 
 ## Usage
