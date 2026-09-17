@@ -7,6 +7,7 @@ $finder = PhpCsFixer\Finder::create()
     ->name('*.php')
     ->in(__DIR__ . '/src')
     ->in(__DIR__ . '/tests')
+    ->in(__DIR__ . '/resources')
 ;
 
 /** @var array $config */

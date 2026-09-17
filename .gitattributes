@@ -7,10 +7,12 @@
 .gitignore               export-ignore
 .php-cs-fixer.php        export-ignore
 .php_cs                  export-ignore
+doc/                     export-ignore
 infection.json           export-ignore
 LICENSE                  export-ignore
 phpstan.neon             export-ignore
 phpunit.integration.xml  export-ignore
 phpunit.xml              export-ignore
+resources/               export-ignore
 sonar-project.properties export-ignore
 tests/                   export-ignore

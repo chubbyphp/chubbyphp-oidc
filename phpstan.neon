@@ -1,1 +1,16 @@
 parameters:
+    # the types of the flow diagram generator (resources/flow)
+    typeAliases:
+        FlowSegment: 'array{t: string, mono?: bool, bold?: bool, color?: string, href?: string}'
+        FlowLine: 'string|list<string|FlowSegment>'
+        FlowColor: "'blue'|'purple'|'green'|'orange'"
+        FlowParticipant: 'array{id: string, color: FlowColor, title: string, subtitle: FlowLine, bullets: list<FlowLine>}'
+        FlowBand: "array{kind: 'band', title: string, subtitle: FlowLine}"
+        FlowNote: "array{kind: 'note', lane: string, lines: list<FlowLine>, error?: bool}"
+        FlowArrow: "array{kind: 'arrow', from: string, to: string, lines: list<FlowLine>, response?: bool}"
+        FlowItem: 'FlowBand|FlowNote|FlowArrow'
+        FlowLayout: 'array{laneGap: int, participantWidth: int, noteWidth: int}'
+        FlowDiagram: 'array{title: string, intro: string, label: string, participants: list<FlowParticipant>, items: list<FlowItem>, specs: FlowLine, layout?: array{laneGap?: int, participantWidth?: int, noteWidth?: int}}'
+        FlowLaneStyle: 'array{x: float|int, stroke: string, fill: string, text: string}'
+        FlowFragment: 'array{height: float|int, elements: list<string>}'
+        FlowState: 'array{y: float|int, step: int, elements: list<string>}'
